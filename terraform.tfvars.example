@@ -1,0 +1,49 @@
+# ── Required ─────────────────────────────────────────────────────────────────
+
+location            = "eastus"
+resource_group_name = "rg-socket-firewall"
+environment_name    = "socket-fw"
+
+# Socket API token (set via TF_VAR_socket_api_token env var or -var flag)
+# socket_api_token = ""
+
+# VNet and subnet for internal networking.
+# The subnet must be delegated to Microsoft.App/environments with a /23 CIDR minimum.
+vnet_id   = "/subscriptions/<SUB_ID>/resourceGroups/<RG>/providers/Microsoft.Network/virtualNetworks/<VNET>"
+subnet_id = "/subscriptions/<SUB_ID>/resourceGroups/<RG>/providers/Microsoft.Network/virtualNetworks/<VNET>/subnets/<SUBNET>"
+
+# ── Socket config ────────────────────────────────────────────────────────────
+
+# Base64-encoded contents of socket.yml
+# Generate with: base64 -i socket.yml
+socket_yml_content = "IyBzb2NrZXQueW1sIGNvbnRlbnQgaGVyZQ=="
+
+socket_fail_open = false
+
+# ── SSL certificates ────────────────────────────────────────────────────────
+
+# Base64-encoded PEM files (set via TF_VAR_ env vars for CI/CD)
+# ssl_cert = ""
+# ssl_key  = ""
+
+# ── Redis (optional) ────────────────────────────────────────────────────────
+
+redis_enabled = false
+# redis_host  = "redis.internal.example.com"
+# redis_port  = 6379
+
+# ── Scaling ──────────────────────────────────────────────────────────────────
+
+firewall_image = "socketdev/socket-registry-firewall:latest"
+min_replicas   = 2
+max_replicas   = 10
+cpu            = 1.0
+memory         = "2Gi"
+
+# ── Tags ─────────────────────────────────────────────────────────────────────
+
+tags = {
+  managed-by  = "terraform"
+  service     = "socket-registry-firewall"
+  environment = "production"
+}
