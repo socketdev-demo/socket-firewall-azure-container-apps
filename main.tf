@@ -21,6 +21,35 @@ data "azurerm_client_config" "current" {}
 
 locals {
   env_name = var.environment_name
+
+  routes = [for name, upstream in var.registries : {
+    path     = "/${name}"
+    upstream = upstream
+    registry = name
+  }]
+
+  socket_yml = yamlencode({
+    ports = {
+      http  = 8080
+      https = 8443
+    }
+    socket = {
+      api_url   = "https://api.socket.dev"
+      fail_open = var.socket_fail_open
+    }
+    cache = {
+      ttl = 600
+    }
+    ssl = {
+      cert = "/mnt/config/ssl-cert"
+      key  = "/mnt/config/ssl-key"
+    }
+    path_routing = {
+      enabled = true
+      domain  = "${var.domain} localhost"
+      routes  = local.routes
+    }
+  })
 }
 
 # ── Resource Group ───────────────────────────────────────────────────────────
@@ -155,7 +184,7 @@ resource "azurerm_container_app" "firewall" {
 
   secret {
     name  = "socket-yml"
-    value = var.socket_yml_content
+    value = local.socket_yml
   }
 
   # ── Ingress (internal only) ─────────────────────────────────────────────
@@ -199,11 +228,6 @@ resource "azurerm_container_app" "firewall" {
       env {
         name  = "CONFIG_FILE"
         value = "/mnt/config/socket-yml"
-      }
-
-      env {
-        name  = "SOCKET_FAIL_OPEN"
-        value = tostring(var.socket_fail_open)
       }
 
       env {

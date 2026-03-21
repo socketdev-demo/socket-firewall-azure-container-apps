@@ -36,8 +36,16 @@ variable "socket_fail_open" {
   default     = true
 }
 
-variable "socket_yml_content" {
-  description = "Contents of socket.yml config file (base64-encoded)"
+variable "registries" {
+  description = "Map of registry name to upstream URL. Each entry creates a path-based route (e.g., npm = https://registry.npmjs.org creates /npm)."
+  type        = map(string)
+  default = {
+    npm = "https://registry.npmjs.org"
+  }
+}
+
+variable "domain" {
+  description = "Hostname for path-based routing (e.g., registry.company.com). Use the FQDN from the first deploy or your custom DNS name."
   type        = string
 }
 

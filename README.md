@@ -35,16 +35,86 @@ terraform apply
 See `variables.tf` for all configurable inputs with descriptions and defaults.
 
 Key variables:
-- `socket_api_token` - Socket.dev API token (required)
-- `socket_yml_content` - Contents of your socket.yml config (required)
-- `ssl_cert` / `ssl_key` - SSL certificate PEM content (required)
-- `subnet_id` - Delegated subnet for the Container Apps Environment (required)
-- `min_replicas` / `max_replicas` - Scaling bounds (default: 1 / 4)
-- `cpu` / `memory` - Container resources (default: 2.0 / 4Gi)
+- `socket_api_token` - Socket.dev API token (required, sensitive)
+- `domain` - Hostname clients use to reach the firewall (required). Set to the FQDN from terraform output or your custom DNS name.
+- `registries` - Map of registry name to upstream URL (default: npm only)
+- `ssl_cert` / `ssl_key` - SSL certificate PEM content (required, sensitive)
+- `subnet_id` / `vnet_id` - Network configuration (required)
+- `min_replicas` / `max_replicas` - Scaling bounds (default: 1 / 5)
+- `cpu` / `memory` - Container resources (default: 1.0 / 2Gi)
+
+## Registries
+
+The `registries` variable controls path-based routing. Each entry creates a route at `/<name>` that proxies to the upstream URL.
+
+```hcl
+registries = {
+  npm   = "https://registry.npmjs.org"
+  pypi  = "https://pypi.org"
+  maven = "https://repo1.maven.org/maven2"
+}
+```
+
+Configure npm to use the firewall:
+
+```bash
+npm config set registry https://registry.company.com/npm
+```
+
+Configure pip:
+
+```bash
+pip install --index-url https://registry.company.com/pypi/simple <package>
+```
+
+## Outputs
+
+- `fqdn` - Internal FQDN of the Container App
+- `resource_group_name` - Resource group name
+- `container_app_name` - Container App name
+- `container_app_environment_name` - Container Apps Environment name
+- `key_vault_name` - Key Vault name
+- `managed_identity_client_id` - Managed Identity client ID
+
+## Verify the deployment
+
+The firewall runs on an internal load balancer, so you must test from a VM or resource within the VNet.
+
+Check the health endpoint:
+
+```bash
+curl -k https://<FQDN>/health
+```
+
+Test npm package resolution through the firewall:
+
+```bash
+npm config set registry https://<FQDN>/npm
+npm view lodash version
+```
+
+## Troubleshooting
+
+**Containers keep restarting**
+Check logs in Log Analytics. The most common cause is an invalid or missing SSL certificate. Verify your `ssl_cert` and `ssl_key` values are base64-encoded PEM files.
+
+**404 errors on package requests**
+The `domain` variable must match the Host header that clients send. If you are using the Container App FQDN directly, set `domain` to that FQDN. Run `terraform output fqdn` to get the value.
+
+**Packages resolve but are not scanned**
+Verify your API token has the `packages` and `entitlements:list` scopes. You can test the token directly:
+```bash
+curl -H "Authorization: Bearer $SOCKET_API_TOKEN" https://api.socket.dev/v0/report/supported
+```
+
+**Key Vault soft-delete conflict**
+If you destroy and recreate the stack, Azure retains the Key Vault in a soft-deleted state for 7 days. Either purge it manually (`az keyvault purge --name <vault-name>`) or use a different `environment_name`.
 
 ## Notes
 
-Azure Container Apps mounts secrets as files in a shared volume at `/mnt/config/`. The template sets the `CONFIG_FILE` env var so the firewall reads socket.yml from the correct path. SSL certificate paths in your `socket.yml` should reference `/mnt/config/ssl-cert` and `/mnt/config/ssl-key`.
+Azure Container Apps mounts secrets as files in a shared volume at `/mnt/config/`. The template sets the `CONFIG_FILE` env var so the firewall reads socket.yml from the correct path. SSL certificate paths in the generated `socket.yml` reference `/mnt/config/ssl-cert` and `/mnt/config/ssl-key`.
+
+The `socket.yml` config is auto-generated from the `registries` and `domain` variables. You do not need to write or encode it manually.
 
 ## Other deployment options
 
