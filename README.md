@@ -78,19 +78,21 @@ pip install --index-url https://registry.company.com/pypi/simple <package>
 
 ## Verify the deployment
 
-The firewall runs on an internal load balancer, so you must test from a VM or resource within the VNet.
-
-Check the health endpoint:
+The firewall runs on an internal load balancer, so test from a VM or resource within the VNet.
 
 ```bash
+# Health check — should include "path-routing" in the response
 curl -k https://<FQDN>/health
-```
+# Expected: SocketFirewall/x.x.x - Health OK - path-routing (...)
 
-Test npm package resolution through the firewall:
+# Test a safe package
+npm install lodash --registry https://<FQDN>/npm
 
-```bash
-npm config set registry https://<FQDN>/npm
-npm view lodash version
+# Test a blocked package
+# IMPORTANT: clear npm cache first, or cached tarballs bypass the firewall
+npm cache clean --force
+npm install form-data@2.3.3 --registry https://<FQDN>/npm --prefer-online
+# Expected: E403 "Blocked by Security Policy"
 ```
 
 ## Troubleshooting
@@ -101,11 +103,8 @@ Check logs in Log Analytics. The most common cause is an invalid or missing SSL 
 **404 errors on package requests**
 The `domain` variable must match the Host header that clients send. If you are using the Container App FQDN directly, set `domain` to that FQDN. Run `terraform output fqdn` to get the value.
 
-**Packages resolve but are not scanned**
-Verify your API token has the `packages` and `entitlements:list` scopes. You can test the token directly:
-```bash
-curl -H "Authorization: Bearer $SOCKET_API_TOKEN" https://api.socket.dev/v0/report/supported
-```
+**Packages install but are not scanned**
+Verify your API token has the `packages` and `entitlements:list` scopes. With `socket_fail_open = true` (the default), invalid or missing tokens silently pass all packages through without scanning. Check container logs for `Firewall access validation failed` or `401` errors.
 
 **Key Vault soft-delete conflict**
 If you destroy and recreate the stack, Azure retains the Key Vault in a soft-deleted state for 7 days. Either purge it manually (`az keyvault purge --name <vault-name>`) or use a different `environment_name`.
