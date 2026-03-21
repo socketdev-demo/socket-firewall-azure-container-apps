@@ -91,7 +91,7 @@ npm install lodash --registry https://<FQDN>/npm
 # Test a blocked package
 # IMPORTANT: clear npm cache first, or cached tarballs bypass the firewall
 npm cache clean --force
-npm install form-data@2.3.3 --registry https://<FQDN>/npm --prefer-online
+npm install peacenotwar@9.1.3 --registry https://<FQDN>/npm --prefer-online
 # Expected: E403 "Blocked by Security Policy"
 ```
 
