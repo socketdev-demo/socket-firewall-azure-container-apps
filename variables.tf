@@ -49,6 +49,28 @@ variable "domain" {
   type        = string
 }
 
+# ── Debug Logging ─────────────────────────────────────────────────────────────
+
+variable "debug_logging_enabled" {
+  description = "Enable debug logging for HTTP requests and responses"
+  type        = bool
+  default     = false
+}
+
+variable "debug_user_agent_filter" {
+  description = "Glob pattern to filter debug logs by user-agent (case-insensitive, e.g. 'pip' or 'npm*')"
+  type        = string
+  default     = ""
+}
+
+# ── Recently Published ────────────────────────────────────────────────────────
+
+variable "recently_published_enabled_ecosystems" {
+  description = "List of ecosystems to enforce recently-published package blocking (e.g. [\"npm\", \"pypi\"])"
+  type        = list(string)
+  default     = []
+}
+
 # ── SSL ──────────────────────────────────────────────────────────────────────
 
 variable "ssl_cert" {

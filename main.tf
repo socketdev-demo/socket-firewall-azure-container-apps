@@ -22,34 +22,53 @@ data "azurerm_client_config" "current" {}
 locals {
   env_name = var.environment_name
 
+  # Direct routes: /npm -> https://registry.npmjs.org
+  # For Artifactory (upstream mode), use /repository/<repo-name> paths instead:
+  #   registries = {
+  #     "repository/npm-remote" = "https://company.jfrog.io/artifactory/api/npm/npm-remote"
+  #   }
+  # This creates a route at /repository/npm-remote that proxies to your Artifactory
+  # virtual or remote repository. Configure npm with:
+  #   npm config set registry https://<FQDN>/repository/npm-remote
+
   routes = [for name, upstream in var.registries : {
     path     = "/${name}"
     upstream = upstream
     registry = name
   }]
 
-  socket_yml = yamlencode({
-    ports = {
-      http  = 8080
-      https = 8443
-    }
-    socket = {
-      api_url   = "https://api.socket.dev"
-      fail_open = var.socket_fail_open
-    }
-    cache = {
-      ttl = 600
-    }
-    ssl = {
-      cert = "/mnt/config/ssl-cert"
-      key  = "/mnt/config/ssl-key"
-    }
-    path_routing = {
-      enabled = true
-      domain  = "${var.domain} localhost"
-      routes  = local.routes
-    }
-  })
+  socket_yml = yamlencode(merge(
+    {
+      ports = {
+        http  = 8080
+        https = 8443
+      }
+      socket = {
+        fail_open = var.socket_fail_open
+      }
+      cache = {
+        ttl = 600
+      }
+      ssl = {
+        cert = "/mnt/config/ssl-cert"
+        key  = "/mnt/config/ssl-key"
+      }
+      path_routing = {
+        enabled = true
+        domain  = "${var.domain} localhost"
+        routes  = local.routes
+      }
+    },
+    var.debug_logging_enabled ? {
+      debug = merge(
+        { logging_enabled = true },
+        var.debug_user_agent_filter != "" ? { user_agent_filter = var.debug_user_agent_filter } : {}
+      )
+    } : {},
+    length(var.recently_published_enabled_ecosystems) > 0 ? {
+      recently_published_enabled_ecosystems = var.recently_published_enabled_ecosystems
+    } : {}
+  ))
 }
 
 # ── Resource Group ───────────────────────────────────────────────────────────

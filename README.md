@@ -42,10 +42,15 @@ Key variables:
 - `subnet_id` / `vnet_id` - Network configuration (required)
 - `min_replicas` / `max_replicas` - Scaling bounds (default: 1 / 5)
 - `cpu` / `memory` - Container resources (default: 1.0 / 2Gi)
+- `debug_logging_enabled` - Enable debug logging for HTTP requests/responses (default: false)
+- `debug_user_agent_filter` - Glob pattern to filter debug logs by user-agent (default: "")
+- `recently_published_enabled_ecosystems` - Ecosystems to enforce recently-published blocking (default: [])
 
 ## Registries
 
 The `registries` variable controls path-based routing. Each entry creates a route at `/<name>` that proxies to the upstream URL.
+
+### Direct routes (firewall in front of public registries)
 
 ```hcl
 registries = {
@@ -55,16 +60,25 @@ registries = {
 }
 ```
 
-Configure npm to use the firewall:
-
 ```bash
 npm config set registry https://registry.company.com/npm
+pip install --index-url https://registry.company.com/pypi/simple <package>
 ```
 
-Configure pip:
+### Upstream mode (firewall in front of Artifactory)
+
+If you use Artifactory (or another artifact repository manager), use `/repository/<repo-name>` paths to match Artifactory's URL convention:
+
+```hcl
+registries = {
+  "repository/npm-remote"  = "https://company.jfrog.io/artifactory/api/npm/npm-remote"
+  "repository/pypi-remote" = "https://company.jfrog.io/artifactory/api/pypi/pypi-remote"
+}
+```
 
 ```bash
-pip install --index-url https://registry.company.com/pypi/simple <package>
+npm config set registry https://registry.company.com/repository/npm-remote
+pip install --index-url https://registry.company.com/repository/pypi-remote/simple <package>
 ```
 
 ## Outputs

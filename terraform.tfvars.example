@@ -17,13 +17,29 @@ subnet_id = "/subscriptions/<SUB_ID>/resourceGroups/<RG>/providers/Microsoft.Net
 
 # Registries to proxy (default: npm only)
 # Each entry creates a path-based route: /npm, /pypi, etc.
+#
+# Direct routes (firewall in front of public registries):
 registries = {
   npm = "https://registry.npmjs.org"
   # pypi  = "https://pypi.org"
   # maven = "https://repo1.maven.org/maven2"
 }
+#
+# Artifactory / upstream mode (firewall in front of Artifactory):
+# registries = {
+#   "repository/npm-remote" = "https://company.jfrog.io/artifactory/api/npm/npm-remote"
+#   "repository/pypi-remote" = "https://company.jfrog.io/artifactory/api/pypi/pypi-remote"
+# }
 
 socket_fail_open = true
+
+# Debug logging (optional, useful for troubleshooting)
+# debug_logging_enabled    = true
+# debug_user_agent_filter  = "pip"   # glob pattern, case-insensitive
+
+# Recently published package enforcement (optional)
+# Blocks packages published within the last 72 hours for the listed ecosystems.
+# recently_published_enabled_ecosystems = ["npm"]
 
 # SSL certificates (base64-encoded PEM, set via TF_VAR_ env vars for CI/CD)
 # ssl_cert = ""
