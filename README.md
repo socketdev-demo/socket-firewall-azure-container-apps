@@ -111,14 +111,39 @@ npm install peacenotwar@9.1.3 --registry https://<FQDN>/npm --prefer-online
 
 ## Troubleshooting
 
+After `terraform apply`, run `terraform output troubleshooting` to see useful debugging commands for your deployment.
+
+To enable verbose logging, set `log_level = "debug"` in your tfvars and redeploy. This sets nginx error_log to debug level, showing TLS handshake details, upstream connections, and request routing decisions.
+
 **Containers keep restarting**
-Check logs in Log Analytics. The most common cause is an invalid or missing SSL certificate. Verify your `ssl_cert` and `ssl_key` values are base64-encoded PEM files.
+Check logs in Log Analytics or with `az containerapp logs show`. The most common cause is an invalid or missing SSL certificate. If using the default self-signed cert (`generate_self_signed_cert = true`), verify the SANs with `terraform output ssl_cert_sans`.
 
 **404 errors on package requests**
 The `domain` variable must match the Host header that clients send. If you are using the Container App FQDN directly, set `domain` to that FQDN. Run `terraform output fqdn` to get the value.
 
+**Azure Front Door: 421 SSLMismatchedSNI**
+Front Door validates that the Host header matches a custom domain configured on the Front Door profile. This error means either:
+1. The custom domain is not associated with the Front Door endpoint/route, or
+2. The origin host header does not match the cert's SANs.
+
+The `domain` variable controls the cert SANs (when using the self-signed cert). Include all hostnames that Front Door might send, separated by spaces:
+```hcl
+domain = "registry.company.com ca-socket-fw.xxxxx.eastus.azurecontainerapps.io"
+```
+
+**Tarball URLs point to the Container App FQDN instead of the customer-facing domain**
+The firewall rewrites tarball URLs using the `Host` header it receives. If Front Door's origin host header is set to the Container App FQDN, tarball URLs will use that FQDN, and npm clients will try to download tarballs directly (bypassing Front Door), which fails with ECONNRESET.
+
+Fix: Set the Front Door origin host header to the customer-facing domain (e.g., `registry.company.com`), and make sure that domain is included in the `domain` variable so the cert's SANs match.
+
 **Packages install but are not scanned**
 Verify your API token has the `packages` and `entitlements:list` scopes. With `socket_fail_open = true` (the default), invalid or missing tokens silently pass all packages through without scanning. Check container logs for `Firewall access validation failed` or `401` errors.
+
+**Secret changes not taking effect after terraform apply**
+Container Apps secret volumes are immutable per revision. Restarting the same revision reloads the same secrets. Force a new revision:
+```bash
+az containerapp update -n <app-name> -g <resource-group>
+```
 
 **Key Vault soft-delete conflict**
 If you destroy and recreate the stack, Azure retains the Key Vault in a soft-deleted state for 7 days. Either purge it manually (`az keyvault purge --name <vault-name>`) or use a different `environment_name`.

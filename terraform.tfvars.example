@@ -8,6 +8,11 @@ environment_name    = "socket-fw"
 
 # Hostname clients use to reach the firewall.
 # After first deploy, set to the FQDN from terraform output, or use your custom DNS name.
+#
+# IMPORTANT: If you use Azure Front Door with private link and certificate subject
+# name validation, include ALL hostnames that need to match the cert's SANs.
+# Separate multiple hostnames with spaces:
+#   domain = "registry.company.com ca-socket-fw.happystone-xxxx.eastus.azurecontainerapps.io"
 domain = "registry.company.com"
 
 # VNet and subnet for internal networking.
@@ -33,17 +38,23 @@ registries = {
 
 socket_fail_open = true
 
-# Debug logging (optional, useful for troubleshooting)
+# Logging
+# log_level = "debug"  # error, warn, info, debug. Use "debug" to see TLS handshakes and full request details.
+
+# Debug logging (logs full HTTP request/response headers for matching requests)
 # debug_logging_enabled    = true
-# debug_user_agent_filter  = "pip"   # glob pattern, case-insensitive
+# debug_user_agent_filter  = "npm*"   # glob pattern, case-insensitive. Empty = log all.
 
 # Recently published package enforcement (optional)
 # Blocks packages published within the last 72 hours for the listed ecosystems.
 # recently_published_enabled_ecosystems = ["npm"]
 
-# SSL certificates (base64-encoded PEM, set via TF_VAR_ env vars for CI/CD)
-# ssl_cert = ""
-# ssl_key  = ""
+# SSL certificates
+# By default, a self-signed cert is generated with SANs matching the domain variable.
+# Set generate_self_signed_cert = false to provide your own cert/key.
+# generate_self_signed_cert = false
+# ssl_cert = ""  # PEM-encoded certificate (set via TF_VAR_ssl_cert env var for CI/CD)
+# ssl_key  = ""  # PEM-encoded private key (set via TF_VAR_ssl_key env var for CI/CD)
 
 # Redis (optional)
 redis_enabled = false

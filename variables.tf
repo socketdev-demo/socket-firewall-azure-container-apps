@@ -49,7 +49,18 @@ variable "domain" {
   type        = string
 }
 
-# ── Debug Logging ─────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+variable "log_level" {
+  description = "Firewall log level: error, warn, info, debug. Debug shows TLS handshakes and full request details in nginx error log."
+  type        = string
+  default     = "info"
+
+  validation {
+    condition     = contains(["error", "warn", "info", "debug"], var.log_level)
+    error_message = "log_level must be one of: error, warn, info, debug"
+  }
+}
 
 variable "debug_logging_enabled" {
   description = "Enable debug logging for HTTP requests and responses"
@@ -73,16 +84,24 @@ variable "recently_published_enabled_ecosystems" {
 
 # ── SSL ──────────────────────────────────────────────────────────────────────
 
+variable "generate_self_signed_cert" {
+  description = "Generate a self-signed TLS certificate with SANs matching the domain variable. Set to false and provide ssl_cert/ssl_key to use your own certificate."
+  type        = bool
+  default     = true
+}
+
 variable "ssl_cert" {
-  description = "PEM-encoded SSL certificate for the firewall (base64-encoded)"
+  description = "PEM-encoded SSL certificate (ignored when generate_self_signed_cert = true)"
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 variable "ssl_key" {
-  description = "PEM-encoded SSL private key for the firewall (base64-encoded)"
+  description = "PEM-encoded SSL private key (ignored when generate_self_signed_cert = true)"
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 # ── Redis (optional) ────────────────────────────────────────────────────────

@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 3.80"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 }
 
@@ -134,9 +138,56 @@ resource "azurerm_key_vault_secret" "socket_api_token" {
   depends_on = [azurerm_role_assignment.kv_secrets_officer]
 }
 
+# ── Self-signed TLS certificate (optional) ──────────────────────────────────
+# When generate_self_signed_cert = true, creates a server cert with SANs matching
+# the domain variable. This covers common setups where the firewall sits behind
+# a load balancer (Azure Front Door, Application Gateway, etc.) that terminates
+# the public TLS and re-encrypts to the Container App.
+#
+# For Front Door with private link + certificate subject name validation, the
+# cert must include a SAN matching the origin host header. Add extra hostnames
+# (e.g., the Front Door endpoint FQDN) to the domain variable separated by spaces.
+
+resource "tls_private_key" "server" {
+  count     = var.generate_self_signed_cert ? 1 : 0
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_self_signed_cert" "server" {
+  count           = var.generate_self_signed_cert ? 1 : 0
+  private_key_pem = tls_private_key.server[0].private_key_pem
+
+  subject {
+    common_name  = split(" ", var.domain)[0]
+    organization = "Socket Firewall (${local.env_name})"
+  }
+
+  # Include all space-separated hostnames from the domain variable as SANs,
+  # plus "localhost" for in-container testing.
+  dns_names = concat(
+    [for d in split(" ", var.domain) : d if d != "localhost"],
+    ["localhost"]
+  )
+
+  validity_period_hours = 87600 # 10 years
+  is_ca_certificate     = false
+
+  allowed_uses = [
+    "key_encipherment",
+    "digital_signature",
+    "server_auth",
+  ]
+}
+
+locals {
+  ssl_cert_pem = var.generate_self_signed_cert ? tls_self_signed_cert.server[0].cert_pem : var.ssl_cert
+  ssl_key_pem  = var.generate_self_signed_cert ? tls_private_key.server[0].private_key_pem : var.ssl_key
+}
+
 resource "azurerm_key_vault_secret" "ssl_cert" {
   name         = "ssl-cert"
-  value        = var.ssl_cert
+  value        = local.ssl_cert_pem
   key_vault_id = azurerm_key_vault.this.id
 
   depends_on = [azurerm_role_assignment.kv_secrets_officer]
@@ -144,7 +195,7 @@ resource "azurerm_key_vault_secret" "ssl_cert" {
 
 resource "azurerm_key_vault_secret" "ssl_key" {
   name         = "ssl-key"
-  value        = var.ssl_key
+  value        = local.ssl_key_pem
   key_vault_id = azurerm_key_vault.this.id
 
   depends_on = [azurerm_role_assignment.kv_secrets_officer]
@@ -262,6 +313,27 @@ resource "azurerm_container_app" "firewall" {
       env {
         name  = "REDIS_PORT"
         value = tostring(var.redis_port)
+      }
+
+      # Firewall behavior env vars (must be set as env vars, not just in socket.yml)
+      env {
+        name  = "SOCKET_FAIL_OPEN"
+        value = tostring(var.socket_fail_open)
+      }
+
+      env {
+        name  = "SOCKET_LOG_LEVEL"
+        value = var.log_level
+      }
+
+      env {
+        name  = "SOCKET_DEBUG_LOGGING_ENABLED"
+        value = tostring(var.debug_logging_enabled)
+      }
+
+      env {
+        name  = "SOCKET_DEBUG_USER_AGENT_FILTER"
+        value = var.debug_user_agent_filter
       }
 
       # ── Volume mounts ─────────────────────────────────────────────────
