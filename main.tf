@@ -180,9 +180,19 @@ resource "tls_self_signed_cert" "server" {
   ]
 }
 
+resource "tls_pkcs12_archive" "server" {
+  count               = var.generate_self_signed_cert ? 1 : 0
+  cert_pem            = tls_self_signed_cert.server[0].cert_pem
+  private_key_pem     = tls_private_key.server[0].private_key_pem
+  password            = ""
+}
+
 locals {
   ssl_cert_pem = var.generate_self_signed_cert ? tls_self_signed_cert.server[0].cert_pem : var.ssl_cert
   ssl_key_pem  = var.generate_self_signed_cert ? tls_private_key.server[0].private_key_pem : var.ssl_key
+
+  # Custom domains: all hostnames from the domain variable except "localhost"
+  custom_domains = [for d in split(" ", var.domain) : d if d != "localhost"]
 }
 
 resource "azurerm_key_vault_secret" "ssl_cert" {
@@ -211,12 +221,27 @@ resource "azurerm_container_app_environment" "this" {
   infrastructure_subnet_id       = var.subnet_id
   internal_load_balancer_enabled = true
   tags                           = var.tags
+
+  lifecycle {
+    ignore_changes = [infrastructure_resource_group_name]
+  }
 }
 
-# ── Container Apps Environment Storage (socket.yml) ─────────────────────────
-# Azure Container Apps supports Azure Files for volume mounts. For the config
-# file and SSL certs we use Container App secrets + volume mounts of type
-# "Secret", which are projected as files inside the container.
+# ── Custom Domain + Certificate Binding ──────────────────────────────────────
+# Registers the TLS certificate with the Container Apps Environment and binds
+# each custom domain (from the domain variable) to the Container App.
+# Without this, the Container Apps ingress rejects requests with Host headers
+# that don't match the default FQDN, returning 404 before nginx ever sees them.
+# This is required when Azure Front Door sends the custom domain as the origin
+# host header (which it must, so tarball URLs are rewritten correctly).
+
+resource "azurerm_container_app_environment_certificate" "server" {
+  count                        = var.generate_self_signed_cert ? 1 : 0
+  name                         = "cert-${local.env_name}"
+  container_app_environment_id = azurerm_container_app_environment.this.id
+  certificate_blob_base64      = tls_pkcs12_archive.server[0].content_base64
+  certificate_password         = ""
+}
 
 # ── Container App ────────────────────────────────────────────────────────────
 
@@ -395,4 +420,18 @@ resource "azurerm_container_app" "firewall" {
       }
     }
   }
+}
+
+# ── Custom Domain Bindings ─────────────────────────────────────────────────
+# Bind each custom domain to the Container App so the ingress accepts requests
+# with those Host headers. Without this, Front Door gets 404 when it sends
+# Host: <custom-domain> to the Container App.
+
+resource "azurerm_container_app_custom_domain" "domains" {
+  for_each = var.generate_self_signed_cert ? toset(local.custom_domains) : toset([])
+
+  name                                     = each.value
+  container_app_id                         = azurerm_container_app.firewall.id
+  container_app_environment_certificate_id = azurerm_container_app_environment_certificate.server[0].id
+  certificate_binding_type                 = "SniEnabled"
 }
