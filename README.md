@@ -150,6 +150,8 @@ If you destroy and recreate the stack, Azure retains the Key Vault in a soft-del
 
 ## Notes
 
+**Custom domain binding**: When `generate_self_signed_cert = true`, the template automatically registers each hostname in the `domain` variable as a custom domain on the Container App. This is required so the Container Apps ingress accepts requests with those Host headers. Without it, requests from Front Door (or any client using a custom hostname) get a 404 from the ingress layer before reaching nginx.
+
 Azure Container Apps mounts secrets as files in a shared volume at `/mnt/config/`. The template sets the `CONFIG_FILE` env var so the firewall reads socket.yml from the correct path. SSL certificate paths in the generated `socket.yml` reference `/mnt/config/ssl-cert` and `/mnt/config/ssl-key`.
 
 The `socket.yml` config is auto-generated from the `registries` and `domain` variables. You do not need to write or encode it manually.
