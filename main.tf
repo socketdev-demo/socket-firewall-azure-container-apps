@@ -134,12 +134,26 @@ resource "azurerm_role_assignment" "kv_secrets_officer" {
   principal_id         = data.azurerm_client_config.current.object_id
 }
 
+# Only created when the token is passed directly. With
+# socket_api_token_key_vault_secret_id, the secret is managed out-of-band and
+# the value never enters Terraform or its state.
 resource "azurerm_key_vault_secret" "socket_api_token" {
+  count        = var.socket_api_token != "" && var.socket_api_token_key_vault_secret_id == "" ? 1 : 0
   name         = "socket-api-token"
   value        = var.socket_api_token
   key_vault_id = azurerm_key_vault.this.id
 
   depends_on = [azurerm_role_assignment.kv_secrets_officer]
+}
+
+# Preserve existing deployments now that the secret resources use count
+moved {
+  from = azurerm_key_vault_secret.socket_api_token
+  to   = azurerm_key_vault_secret.socket_api_token[0]
+}
+
+locals {
+  socket_api_token_secret_id = var.socket_api_token_key_vault_secret_id != "" ? var.socket_api_token_key_vault_secret_id : (var.socket_api_token != "" ? azurerm_key_vault_secret.socket_api_token[0].versionless_id : "")
 }
 
 # Only created when the password is passed directly. With
@@ -216,6 +230,7 @@ locals {
 }
 
 resource "azurerm_key_vault_secret" "ssl_cert" {
+  count        = var.ssl_cert_key_vault_secret_id == "" ? 1 : 0
   name         = "ssl-cert"
   value        = local.ssl_cert_pem
   key_vault_id = azurerm_key_vault.this.id
@@ -224,11 +239,28 @@ resource "azurerm_key_vault_secret" "ssl_cert" {
 }
 
 resource "azurerm_key_vault_secret" "ssl_key" {
+  count        = var.ssl_key_key_vault_secret_id == "" ? 1 : 0
   name         = "ssl-key"
   value        = local.ssl_key_pem
   key_vault_id = azurerm_key_vault.this.id
 
   depends_on = [azurerm_role_assignment.kv_secrets_officer]
+}
+
+# Preserve existing deployments now that the secret resources use count
+moved {
+  from = azurerm_key_vault_secret.ssl_cert
+  to   = azurerm_key_vault_secret.ssl_cert[0]
+}
+
+moved {
+  from = azurerm_key_vault_secret.ssl_key
+  to   = azurerm_key_vault_secret.ssl_key[0]
+}
+
+locals {
+  ssl_cert_secret_id = var.ssl_cert_key_vault_secret_id != "" ? var.ssl_cert_key_vault_secret_id : azurerm_key_vault_secret.ssl_cert[0].versionless_id
+  ssl_key_secret_id  = var.ssl_key_key_vault_secret_id != "" ? var.ssl_key_key_vault_secret_id : azurerm_key_vault_secret.ssl_key[0].versionless_id
 }
 
 # ── Container Apps Environment ───────────────────────────────────────────────
@@ -277,23 +309,34 @@ resource "azurerm_container_app" "firewall" {
     identity_ids = [azurerm_user_assigned_identity.this.id]
   }
 
+  lifecycle {
+    precondition {
+      condition     = var.socket_api_token != "" || var.socket_api_token_key_vault_secret_id != ""
+      error_message = "Set socket_api_token or socket_api_token_key_vault_secret_id."
+    }
+    precondition {
+      condition     = !(var.generate_self_signed_cert && (var.ssl_cert_key_vault_secret_id != "" || var.ssl_key_key_vault_secret_id != ""))
+      error_message = "ssl_cert_key_vault_secret_id and ssl_key_key_vault_secret_id require generate_self_signed_cert = false."
+    }
+  }
+
   # ── Secrets (pulled from Key Vault via managed identity) ─────────────────
 
   secret {
     name                = "socket-api-token"
-    key_vault_secret_id = azurerm_key_vault_secret.socket_api_token.versionless_id
+    key_vault_secret_id = local.socket_api_token_secret_id
     identity            = azurerm_user_assigned_identity.this.id
   }
 
   secret {
     name                = "ssl-cert"
-    key_vault_secret_id = azurerm_key_vault_secret.ssl_cert.versionless_id
+    key_vault_secret_id = local.ssl_cert_secret_id
     identity            = azurerm_user_assigned_identity.this.id
   }
 
   secret {
     name                = "ssl-key"
-    key_vault_secret_id = azurerm_key_vault_secret.ssl_key.versionless_id
+    key_vault_secret_id = local.ssl_key_secret_id
     identity            = azurerm_user_assigned_identity.this.id
   }
 

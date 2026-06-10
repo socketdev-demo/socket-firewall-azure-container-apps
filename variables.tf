@@ -25,9 +25,16 @@ variable "firewall_image" {
 }
 
 variable "socket_api_token" {
-  description = "Socket Security API token"
+  description = "Socket Security API token. Persisted in Terraform state; to avoid that, use socket_api_token_key_vault_secret_id instead."
   type        = string
   sensitive   = true
+  default     = ""
+}
+
+variable "socket_api_token_key_vault_secret_id" {
+  description = "ID of an existing Key Vault secret holding the Socket API token (e.g. https://<vault>.vault.azure.net/secrets/<name>), created out-of-band so the value never passes through Terraform or its state. Takes precedence over socket_api_token. The Container App managed identity needs the Key Vault Secrets User role on that vault."
+  type        = string
+  default     = ""
 }
 
 variable "socket_fail_open" {
@@ -101,6 +108,18 @@ variable "ssl_key" {
   description = "PEM-encoded SSL private key (ignored when generate_self_signed_cert = true)"
   type        = string
   sensitive   = true
+  default     = ""
+}
+
+variable "ssl_cert_key_vault_secret_id" {
+  description = "ID of an existing Key Vault secret holding the PEM-encoded SSL certificate, created out-of-band. Takes precedence over ssl_cert. Requires generate_self_signed_cert = false."
+  type        = string
+  default     = ""
+}
+
+variable "ssl_key_key_vault_secret_id" {
+  description = "ID of an existing Key Vault secret holding the PEM-encoded SSL private key, created out-of-band so the key never passes through Terraform or its state. Takes precedence over ssl_key. Requires generate_self_signed_cert = false."
+  type        = string
   default     = ""
 }
 
