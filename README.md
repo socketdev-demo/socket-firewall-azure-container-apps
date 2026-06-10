@@ -38,6 +38,7 @@ Key variables:
 - `socket_api_token` - Socket.dev API token (required, sensitive)
 - `domain` - Hostname clients use to reach the firewall (required). Set to the FQDN from terraform output or your custom DNS name.
 - `registries` - Map of registry name to upstream URL (default: npm only)
+- `registry_overrides` - Map a route name to its firewall ecosystem type when they differ (e.g. `"plugins-gradle" = "maven"`, `"repository/npm-remote" = "npm"`)
 - `ssl_cert` / `ssl_key` - SSL certificate PEM content (required, sensitive)
 - `subnet_id` / `vnet_id` - Network configuration (required)
 - `min_replicas` / `max_replicas` - Scaling bounds (default: 1 / 5)
@@ -54,27 +55,56 @@ The `registries` variable controls path-based routing. Each entry creates a rout
 
 ### Direct routes (firewall in front of public registries)
 
+All supported ecosystems:
+
 ```hcl
 registries = {
-  npm   = "https://registry.npmjs.org"
-  pypi  = "https://pypi.org"
-  maven = "https://repo1.maven.org/maven2"
+  npm              = "https://registry.npmjs.org"
+  pypi             = "https://pypi.org"
+  maven            = "https://repo1.maven.org/maven2"
+  "plugins-gradle" = "https://plugins.gradle.org/m2"
+  rubygems         = "https://rubygems.org"
+  go               = "https://proxy.golang.org"
+  cargo            = "https://index.crates.io"
+}
+
+registry_overrides = {
+  "plugins-gradle" = "maven" # route name differs from the ecosystem type
 }
 ```
+
+Client configuration:
 
 ```bash
 npm config set registry https://registry.company.com/npm
 pip install --index-url https://registry.company.com/pypi/simple <package>
+gem sources --add https://registry.company.com/rubygems/
+go env -w GOPROXY=https://registry.company.com/go
 ```
+
+```toml
+# ~/.cargo/config.toml
+[source.crates-io]
+replace-with = "socket-firewall"
+[source.socket-firewall]
+registry = "sparse+https://registry.company.com/cargo/"
+```
+
+Maven/Gradle: point your `<mirror>` (settings.xml) or `repositories`/`pluginManagement` blocks (Gradle) at `https://registry.company.com/maven` and `https://registry.company.com/plugins-gradle`.
 
 ### Upstream mode (firewall in front of Artifactory)
 
-If you use Artifactory (or another artifact repository manager), use `/repository/<repo-name>` paths to match Artifactory's URL convention:
+If you use Artifactory (or another artifact repository manager), use `/repository/<repo-name>` paths to match Artifactory's URL convention, and map each route to its ecosystem with `registry_overrides` (the firewall selects its parser by ecosystem; without the override the route has no parser and traffic passes through unscanned):
 
 ```hcl
 registries = {
   "repository/npm-remote"  = "https://company.jfrog.io/artifactory/api/npm/npm-remote"
   "repository/pypi-remote" = "https://company.jfrog.io/artifactory/api/pypi/pypi-remote"
+}
+
+registry_overrides = {
+  "repository/npm-remote"  = "npm"
+  "repository/pypi-remote" = "pypi"
 }
 ```
 
