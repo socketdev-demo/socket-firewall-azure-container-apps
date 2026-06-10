@@ -62,8 +62,13 @@ socket_fail_open = true
 redis_enabled = false
 # redis_host     = "<name>.redis.cache.windows.net"
 # redis_port     = 6380
-# redis_password = ""    # Azure Cache access key (set via TF_VAR_redis_password for CI/CD)
+# redis_password = ""    # Azure Cache access key (set via TF_VAR_redis_password for CI/CD;
+#                        # note it is persisted in Terraform state)
 # redis_ssl      = true  # Azure Cache requires TLS on port 6380
+#
+# To keep the password out of Terraform state entirely, create the Key Vault
+# secret out-of-band (az keyvault secret set ...) and reference it instead:
+# redis_password_key_vault_secret_id = "https://<vault>.vault.azure.net/secrets/<name>"
 
 # Scaling
 firewall_image = "socketdev/socket-registry-firewall:latest"

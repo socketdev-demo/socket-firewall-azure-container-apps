@@ -125,10 +125,16 @@ variable "redis_port" {
 }
 
 variable "redis_password" {
-  description = "Redis AUTH password (e.g. Azure Cache for Redis access key). Stored in Key Vault and injected as a secret."
+  description = "Redis AUTH password (e.g. Azure Cache for Redis access key). Stored in Key Vault and injected as a secret. Note: the value is also persisted in Terraform state; to avoid that, use redis_password_key_vault_secret_id instead."
   type        = string
   default     = ""
   sensitive   = true
+}
+
+variable "redis_password_key_vault_secret_id" {
+  description = "ID of an existing Key Vault secret holding the Redis password (e.g. https://<vault>.vault.azure.net/secrets/<name>), created out-of-band so the value never passes through Terraform or its state. Takes precedence over redis_password. The Container App managed identity needs the Key Vault Secrets User role on that vault."
+  type        = string
+  default     = ""
 }
 
 variable "redis_ssl" {

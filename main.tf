@@ -142,13 +142,20 @@ resource "azurerm_key_vault_secret" "socket_api_token" {
   depends_on = [azurerm_role_assignment.kv_secrets_officer]
 }
 
+# Only created when the password is passed directly. With
+# redis_password_key_vault_secret_id, the secret is managed out-of-band and
+# the value never enters Terraform or its state.
 resource "azurerm_key_vault_secret" "redis_password" {
-  count        = var.redis_password != "" ? 1 : 0
+  count        = var.redis_password != "" && var.redis_password_key_vault_secret_id == "" ? 1 : 0
   name         = "redis-password"
   value        = var.redis_password
   key_vault_id = azurerm_key_vault.this.id
 
   depends_on = [azurerm_role_assignment.kv_secrets_officer]
+}
+
+locals {
+  redis_password_secret_id = var.redis_password_key_vault_secret_id != "" ? var.redis_password_key_vault_secret_id : (var.redis_password != "" ? azurerm_key_vault_secret.redis_password[0].versionless_id : "")
 }
 
 # ── Self-signed TLS certificate (optional) ──────────────────────────────────
@@ -296,10 +303,10 @@ resource "azurerm_container_app" "firewall" {
   }
 
   dynamic "secret" {
-    for_each = var.redis_password != "" ? [1] : []
+    for_each = local.redis_password_secret_id != "" ? [1] : []
     content {
       name                = "redis-password"
-      key_vault_secret_id = azurerm_key_vault_secret.redis_password[0].versionless_id
+      key_vault_secret_id = local.redis_password_secret_id
       identity            = azurerm_user_assigned_identity.this.id
     }
   }
@@ -363,7 +370,7 @@ resource "azurerm_container_app" "firewall" {
       }
 
       dynamic "env" {
-        for_each = var.redis_password != "" ? [1] : []
+        for_each = local.redis_password_secret_id != "" ? [1] : []
         content {
           name        = "REDIS_PASSWORD"
           secret_name = "redis-password"

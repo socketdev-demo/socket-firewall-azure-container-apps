@@ -46,6 +46,7 @@ Key variables:
 - `debug_user_agent_filter` - Glob pattern to filter debug logs by user-agent (default: "")
 - `recently_published_enabled_ecosystems` - Ecosystems to enforce recently-published blocking (default: [])
 - `redis_enabled` / `redis_host` / `redis_port` / `redis_password` / `redis_ssl` - Optional shared cache across replicas (default: disabled). For Azure Cache for Redis: use cluster mode disabled (Basic/Standard, or Premium with clustering off), port 6380, `redis_ssl = true`, and set `redis_password` to an access key. Redis failures fail safe to each replica's local cache.
+- `redis_password_key_vault_secret_id` - Reference an existing Key Vault secret for the Redis password instead of `redis_password`. Values passed via `redis_password` end up in Terraform state (as do `socket_api_token` and the TLS key); creating the secret out-of-band and referencing it by ID keeps the password out of Terraform entirely. The Container App managed identity needs the Key Vault Secrets User role on that vault.
 
 ## Registries
 
