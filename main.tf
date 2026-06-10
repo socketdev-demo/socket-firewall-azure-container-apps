@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/tls"
       version = "~> 4.0"
     }
+    pkcs12 = {
+      source  = "chilicat/pkcs12"
+      version = "~> 0.2"
+    }
   }
 }
 
@@ -180,11 +184,11 @@ resource "tls_self_signed_cert" "server" {
   ]
 }
 
-resource "tls_pkcs12_archive" "server" {
-  count               = var.generate_self_signed_cert ? 1 : 0
-  cert_pem            = tls_self_signed_cert.server[0].cert_pem
-  private_key_pem     = tls_private_key.server[0].private_key_pem
-  password            = ""
+resource "pkcs12_from_pem" "server" {
+  count           = var.generate_self_signed_cert ? 1 : 0
+  cert_pem        = tls_self_signed_cert.server[0].cert_pem
+  private_key_pem = tls_private_key.server[0].private_key_pem
+  password        = ""
 }
 
 locals {
@@ -239,7 +243,7 @@ resource "azurerm_container_app_environment_certificate" "server" {
   count                        = var.generate_self_signed_cert ? 1 : 0
   name                         = "cert-${local.env_name}"
   container_app_environment_id = azurerm_container_app_environment.this.id
-  certificate_blob_base64      = tls_pkcs12_archive.server[0].content_base64
+  certificate_blob_base64      = pkcs12_from_pem.server[0].result
   certificate_password         = ""
 }
 
@@ -376,23 +380,23 @@ resource "azurerm_container_app" "firewall" {
       # ── Liveness probe ────────────────────────────────────────────────
 
       liveness_probe {
-        transport        = "HTTPS"
-        port             = 8443
-        path             = "/health"
-        initial_delay    = 15
-        interval_seconds = 30
-        timeout          = 5
+        transport               = "HTTPS"
+        port                    = 8443
+        path                    = "/health"
+        initial_delay           = 15
+        interval_seconds        = 30
+        timeout                 = 5
         failure_count_threshold = 3
       }
 
       # ── Readiness probe ───────────────────────────────────────────────
 
       readiness_probe {
-        transport        = "HTTPS"
-        port             = 8443
-        path             = "/health"
-        interval_seconds = 10
-        timeout          = 3
+        transport               = "HTTPS"
+        port                    = 8443
+        path                    = "/health"
+        interval_seconds        = 10
+        timeout                 = 3
         failure_count_threshold = 3
         success_count_threshold = 1
       }
@@ -400,11 +404,11 @@ resource "azurerm_container_app" "firewall" {
       # ── Startup probe ─────────────────────────────────────────────────
 
       startup_probe {
-        transport        = "HTTPS"
-        port             = 8443
-        path             = "/health"
-        interval_seconds = 5
-        timeout          = 3
+        transport               = "HTTPS"
+        port                    = 8443
+        path                    = "/health"
+        interval_seconds        = 5
+        timeout                 = 3
         failure_count_threshold = 10
       }
     }
