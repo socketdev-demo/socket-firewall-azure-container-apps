@@ -124,6 +124,19 @@ variable "redis_port" {
   default     = 6379
 }
 
+variable "redis_password" {
+  description = "Redis AUTH password (e.g. Azure Cache for Redis access key). Stored in Key Vault and injected as a secret."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "redis_ssl" {
+  description = "Connect to Redis over TLS. Azure Cache for Redis requires TLS on port 6380."
+  type        = bool
+  default     = true
+}
+
 # ── Scaling ──────────────────────────────────────────────────────────────────
 
 variable "min_replicas" {

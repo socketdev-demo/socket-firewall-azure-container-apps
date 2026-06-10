@@ -142,6 +142,15 @@ resource "azurerm_key_vault_secret" "socket_api_token" {
   depends_on = [azurerm_role_assignment.kv_secrets_officer]
 }
 
+resource "azurerm_key_vault_secret" "redis_password" {
+  count        = var.redis_password != "" ? 1 : 0
+  name         = "redis-password"
+  value        = var.redis_password
+  key_vault_id = azurerm_key_vault.this.id
+
+  depends_on = [azurerm_role_assignment.kv_secrets_officer]
+}
+
 # ── Self-signed TLS certificate (optional) ──────────────────────────────────
 # When generate_self_signed_cert = true, creates a server cert with SANs matching
 # the domain variable. This covers common setups where the firewall sits behind
@@ -286,6 +295,15 @@ resource "azurerm_container_app" "firewall" {
     value = local.socket_yml
   }
 
+  dynamic "secret" {
+    for_each = var.redis_password != "" ? [1] : []
+    content {
+      name                = "redis-password"
+      key_vault_secret_id = azurerm_key_vault_secret.redis_password[0].versionless_id
+      identity            = azurerm_user_assigned_identity.this.id
+    }
+  }
+
   # ── Ingress (internal only) ─────────────────────────────────────────────
 
   ingress {
@@ -342,6 +360,19 @@ resource "azurerm_container_app" "firewall" {
       env {
         name  = "REDIS_PORT"
         value = tostring(var.redis_port)
+      }
+
+      dynamic "env" {
+        for_each = var.redis_password != "" ? [1] : []
+        content {
+          name        = "REDIS_PASSWORD"
+          secret_name = "redis-password"
+        }
+      }
+
+      env {
+        name  = "REDIS_SSL"
+        value = tostring(var.redis_ssl)
       }
 
       # Firewall behavior env vars (must be set as env vars, not just in socket.yml)
