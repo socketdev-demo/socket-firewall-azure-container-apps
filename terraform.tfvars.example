@@ -37,6 +37,10 @@ registries = {
   rubygems         = "https://rubygems.org"
   go               = "https://proxy.golang.org"
   cargo            = "https://index.crates.io"
+  nuget            = "https://api.nuget.org"
+  "nuget-v2"       = "https://www.nuget.org/api/v2"
+  conda            = "https://repo.anaconda.com/pkgs/main"
+  openvsx          = "https://open-vsx.org"
 }
 #
 # When a route name is not itself an ecosystem, map it to one here.
@@ -44,6 +48,7 @@ registries = {
 # passes through unscanned.
 registry_overrides = {
   "plugins-gradle" = "maven"
+  "nuget-v2"       = "nuget"
 }
 #
 # Artifactory / upstream mode (firewall in front of Artifactory):

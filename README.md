@@ -66,10 +66,15 @@ registries = {
   rubygems         = "https://rubygems.org"
   go               = "https://proxy.golang.org"
   cargo            = "https://index.crates.io"
+  nuget            = "https://api.nuget.org"
+  "nuget-v2"       = "https://www.nuget.org/api/v2"
+  conda            = "https://repo.anaconda.com/pkgs/main"
+  openvsx          = "https://open-vsx.org"
 }
 
 registry_overrides = {
   "plugins-gradle" = "maven" # route name differs from the ecosystem type
+  "nuget-v2"       = "nuget"
 }
 ```
 
@@ -80,6 +85,8 @@ npm config set registry https://registry.company.com/npm
 pip install --index-url https://registry.company.com/pypi/simple <package>
 gem sources --add https://registry.company.com/rubygems/
 go env -w GOPROXY=https://registry.company.com/go
+dotnet nuget add source https://registry.company.com/nuget/v3/index.json -n socket-firewall
+conda config --add channels https://registry.company.com/conda
 ```
 
 ```toml
@@ -90,7 +97,7 @@ replace-with = "socket-firewall"
 registry = "sparse+https://registry.company.com/cargo/"
 ```
 
-Maven/Gradle: point your `<mirror>` (settings.xml) or `repositories`/`pluginManagement` blocks (Gradle) at `https://registry.company.com/maven` and `https://registry.company.com/plugins-gradle`.
+Maven/Gradle: point your `<mirror>` (settings.xml) or `repositories`/`pluginManagement` blocks (Gradle) at `https://registry.company.com/maven` and `https://registry.company.com/plugins-gradle`. VS Code-compatible editors using Open VSX: set the extension gallery service URL to `https://registry.company.com/openvsx`.
 
 ### Upstream mode (firewall in front of Artifactory)
 
