@@ -358,7 +358,7 @@ resource "azurerm_container_app" "firewall" {
 
   ingress {
     external_enabled = false
-    target_port      = 8443
+    target_port      = 8080
     transport        = "http"
 
     traffic_weight {
