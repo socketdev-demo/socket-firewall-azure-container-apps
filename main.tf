@@ -237,7 +237,10 @@ locals {
   # The ingress certificate (PKCS12 -> environment certificate -> custom domain
   # bindings) can be built whenever Terraform holds the PEM values: always for
   # the generated cert, and for customer-provided ssl_cert/ssl_key.
-  ingress_cert_enabled = var.generate_self_signed_cert || (var.ssl_cert != "" && var.ssl_key != "")
+  # nonsensitive() because expressions derived from sensitive variables are
+  # marked sensitive, and for_each rejects sensitive values. The boolean only
+  # reveals that a cert was provided, never its contents.
+  ingress_cert_enabled = var.generate_self_signed_cert || nonsensitive(var.ssl_cert != "" && var.ssl_key != "")
 
   # Custom domains: all hostnames from the domain variable except "localhost",
   # plus every transparent registry_domains hostname (the ingress must accept
