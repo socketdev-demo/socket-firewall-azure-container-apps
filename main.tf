@@ -357,8 +357,12 @@ resource "azurerm_container_app" "firewall" {
   # ── Ingress (internal only) ─────────────────────────────────────────────
 
   ingress {
-    external_enabled = false
-    target_port      = 8443
+    # On an internal environment, external_enabled = true scopes ingress to
+    # the VNet (portal: "Limited to VNet"). false would scope it to the
+    # Container Apps environment only, making the firewall unreachable from
+    # developer machines, jumpboxes, or Front Door.
+    external_enabled = true
+    target_port      = 8080
     transport        = "http"
 
     traffic_weight {
