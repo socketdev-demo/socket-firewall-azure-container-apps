@@ -56,6 +56,16 @@ variable "domain" {
   type        = string
 }
 
+variable "registry_domains" {
+  description = "Optional host-based (transparent) routing for DNS-redirected registry hostnames. Each entry maps to the firewall's domain-routing config: requests whose Host header matches one of the domains are proxied to the upstream with the original path preserved. Set registry when the entry name is not itself an ecosystem (e.g. a second pypi entry for files.pythonhosted.org). All listed domains are also bound as Container App custom domains and, with the generated cert, added as SANs."
+  type = map(object({
+    domains  = list(string)
+    upstream = string
+    registry = optional(string)
+  }))
+  default = {}
+}
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 variable "log_level" {
