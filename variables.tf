@@ -51,9 +51,25 @@ variable "registries" {
   }
 }
 
+variable "registry_overrides" {
+  description = "Map of registry name (a key in registries) to the firewall ecosystem type, for routes whose path differs from the ecosystem. Needed when a route name is not itself a valid ecosystem, e.g. { \"plugins-gradle\" = \"maven\" } or { \"repository/npm-remote\" = \"npm\" }. Unlisted routes use their registries key as the ecosystem."
+  type        = map(string)
+  default     = {}
+}
+
 variable "domain" {
   description = "Hostname for path-based routing (e.g., registry.company.com). Use the FQDN from the first deploy or your custom DNS name."
   type        = string
+}
+
+variable "registry_domains" {
+  description = "Optional host-based (transparent) routing for DNS-redirected registry hostnames. Each entry maps to the firewall's domain-routing config: requests whose Host header matches one of the domains are proxied to the upstream with the original path preserved. Set registry when the entry name is not itself an ecosystem (e.g. a second pypi entry for files.pythonhosted.org). All listed domains are also bound as Container App custom domains and, with the generated cert, added as SANs."
+  type = map(object({
+    domains  = list(string)
+    upstream = string
+    registry = optional(string)
+  }))
+  default = {}
 }
 
 # ── Logging ───────────────────────────────────────────────────────────────────

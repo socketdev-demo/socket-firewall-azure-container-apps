@@ -42,7 +42,7 @@ locals {
   routes = [for name, upstream in var.registries : {
     path     = "/${name}"
     upstream = upstream
-    registry = name
+    registry = lookup(var.registry_overrides, name, name)
   }]
 
   socket_yml = yamlencode(merge(
@@ -75,6 +75,13 @@ locals {
     } : {},
     length(var.recently_published_enabled_ecosystems) > 0 ? {
       recently_published_enabled_ecosystems = var.recently_published_enabled_ecosystems
+    } : {},
+    # Host-based (transparent) routing for DNS-redirected registry hostnames
+    length(var.registry_domains) > 0 ? {
+      registries = { for k, v in var.registry_domains : k => merge(
+        { domains = v.domains, upstream = v.upstream },
+        v.registry != null ? { registry = v.registry } : {}
+      ) }
     } : {}
   ))
 }
@@ -197,12 +204,10 @@ resource "tls_self_signed_cert" "server" {
     organization = "Socket Firewall (${local.env_name})"
   }
 
-  # Include all space-separated hostnames from the domain variable as SANs,
-  # plus "localhost" for in-container testing.
-  dns_names = concat(
-    [for d in split(" ", var.domain) : d if d != "localhost"],
-    ["localhost"]
-  )
+  # Include all custom-domain hostnames as SANs (the domain variable plus any
+  # transparent registry_domains hostnames), plus "localhost" for in-container
+  # testing.
+  dns_names = concat(local.custom_domains, ["localhost"])
 
   validity_period_hours = 87600 # 10 years
   is_ca_certificate     = false
@@ -214,10 +219,14 @@ resource "tls_self_signed_cert" "server" {
   ]
 }
 
+# Built for both the generated cert and a customer-provided ssl_cert/ssl_key
+# pair, so either reaches the ingress. Not available with the
+# ssl_*_key_vault_secret_id variants (Terraform never sees those values), in
+# which case the cert is only mounted into the container.
 resource "pkcs12_from_pem" "server" {
-  count           = var.generate_self_signed_cert ? 1 : 0
-  cert_pem        = tls_self_signed_cert.server[0].cert_pem
-  private_key_pem = tls_private_key.server[0].private_key_pem
+  count           = local.ingress_cert_enabled ? 1 : 0
+  cert_pem        = local.ssl_cert_pem
+  private_key_pem = local.ssl_key_pem
   password        = ""
 }
 
@@ -225,8 +234,21 @@ locals {
   ssl_cert_pem = var.generate_self_signed_cert ? tls_self_signed_cert.server[0].cert_pem : var.ssl_cert
   ssl_key_pem  = var.generate_self_signed_cert ? tls_private_key.server[0].private_key_pem : var.ssl_key
 
-  # Custom domains: all hostnames from the domain variable except "localhost"
-  custom_domains = [for d in split(" ", var.domain) : d if d != "localhost"]
+  # The ingress certificate (PKCS12 -> environment certificate -> custom domain
+  # bindings) can be built whenever Terraform holds the PEM values: always for
+  # the generated cert, and for customer-provided ssl_cert/ssl_key.
+  # nonsensitive() because expressions derived from sensitive variables are
+  # marked sensitive, and for_each rejects sensitive values. The boolean only
+  # reveals that a cert was provided, never its contents.
+  ingress_cert_enabled = var.generate_self_signed_cert || nonsensitive(var.ssl_cert != "" && var.ssl_key != "")
+
+  # Custom domains: all hostnames from the domain variable except "localhost",
+  # plus every transparent registry_domains hostname (the ingress must accept
+  # those Host headers for DNS-redirected traffic to reach nginx).
+  custom_domains = distinct(concat(
+    [for d in split(" ", var.domain) : d if d != "localhost"],
+    flatten([for v in values(var.registry_domains) : v.domains])
+  ))
 }
 
 resource "azurerm_key_vault_secret" "ssl_cert" {
@@ -288,7 +310,7 @@ resource "azurerm_container_app_environment" "this" {
 # host header (which it must, so tarball URLs are rewritten correctly).
 
 resource "azurerm_container_app_environment_certificate" "server" {
-  count                        = var.generate_self_signed_cert ? 1 : 0
+  count                        = local.ingress_cert_enabled ? 1 : 0
   name                         = "cert-${local.env_name}"
   container_app_environment_id = azurerm_container_app_environment.this.id
   certificate_blob_base64      = pkcs12_from_pem.server[0].result
@@ -357,8 +379,12 @@ resource "azurerm_container_app" "firewall" {
   # ── Ingress (internal only) ─────────────────────────────────────────────
 
   ingress {
-    external_enabled = false
-    target_port      = 8443
+    # On an internal environment, external_enabled = true scopes ingress to
+    # the VNet (portal: "Limited to VNet"). false would scope it to the
+    # Container Apps environment only, making the firewall unreachable from
+    # developer machines, jumpboxes, or Front Door.
+    external_enabled = true
+    target_port      = 8080
     transport        = "http"
 
     traffic_weight {
@@ -513,7 +539,7 @@ resource "azurerm_container_app" "firewall" {
 # Host: <custom-domain> to the Container App.
 
 resource "azurerm_container_app_custom_domain" "domains" {
-  for_each = var.generate_self_signed_cert ? toset(local.custom_domains) : toset([])
+  for_each = local.ingress_cert_enabled ? toset(local.custom_domains) : toset([])
 
   name                                     = each.value
   container_app_id                         = azurerm_container_app.firewall.id

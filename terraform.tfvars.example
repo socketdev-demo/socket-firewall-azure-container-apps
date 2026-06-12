@@ -30,15 +30,57 @@ subnet_id = "/subscriptions/<SUB_ID>/resourceGroups/<RG>/providers/Microsoft.Net
 #
 # Direct routes (firewall in front of public registries):
 registries = {
-  npm = "https://registry.npmjs.org"
-  # pypi  = "https://pypi.org"
-  # maven = "https://repo1.maven.org/maven2"
+  npm              = "https://registry.npmjs.org"
+  pypi             = "https://pypi.org"
+  maven            = "https://repo1.maven.org/maven2"
+  "plugins-gradle" = "https://plugins.gradle.org/m2"
+  rubygems         = "https://rubygems.org"
+  go               = "https://proxy.golang.org"
+  cargo            = "https://index.crates.io"
+  nuget            = "https://api.nuget.org"
+  "nuget-v2"       = "https://www.nuget.org/api/v2"
+  conda            = "https://repo.anaconda.com/pkgs/main"
+  openvsx          = "https://open-vsx.org"
+}
+#
+# When a route name is not itself an ecosystem, map it to one here.
+# Without this, the firewall has no parser for the route and traffic
+# passes through unscanned.
+registry_overrides = {
+  "plugins-gradle" = "maven"
+  "nuget-v2"       = "nuget"
 }
 #
 # Artifactory / upstream mode (firewall in front of Artifactory):
 # registries = {
-#   "repository/npm-remote" = "https://company.jfrog.io/artifactory/api/npm/npm-remote"
+#   "repository/npm-remote"  = "https://company.jfrog.io/artifactory/api/npm/npm-remote"
 #   "repository/pypi-remote" = "https://company.jfrog.io/artifactory/api/pypi/pypi-remote"
+# }
+# registry_overrides = {
+#   "repository/npm-remote"  = "npm"
+#   "repository/pypi-remote" = "pypi"
+# }
+
+# Transparent DNS interception (optional)
+# When internal DNS redirects the real registry hostnames to the firewall,
+# enable host-based routing so those requests match (path routing alone
+# returns 404 for them). Every hostname here is also bound as a Container App
+# custom domain and, with the generated cert, added to its SANs. Pair with a
+# certificate developers trust: an internal-CA cert (ssl_cert/ssl_key)
+# carrying these hostnames as SANs is the usual production setup.
+# Upstreams are host roots because transparent requests keep their full path.
+# registry_domains = {
+#   npm          = { domains = ["registry.npmjs.org"], upstream = "https://registry.npmjs.org" }
+#   pypi         = { domains = ["pypi.org"], upstream = "https://pypi.org" }
+#   "pypi-files" = { domains = ["files.pythonhosted.org"], upstream = "https://files.pythonhosted.org", registry = "pypi" }
+#   maven        = { domains = ["repo1.maven.org"], upstream = "https://repo1.maven.org/maven2" }
+#   rubygems     = { domains = ["rubygems.org"], upstream = "https://rubygems.org" }
+#   go           = { domains = ["proxy.golang.org"], upstream = "https://proxy.golang.org" }
+#   cargo        = { domains = ["index.crates.io"], upstream = "https://index.crates.io" }
+#   "cargo-dl"   = { domains = ["static.crates.io"], upstream = "https://static.crates.io", registry = "cargo" }
+#   nuget        = { domains = ["api.nuget.org"], upstream = "https://api.nuget.org" }
+#   conda        = { domains = ["repo.anaconda.com"], upstream = "https://repo.anaconda.com" }
+#   openvsx      = { domains = ["open-vsx.org"], upstream = "https://open-vsx.org" }
 # }
 
 socket_fail_open = true
