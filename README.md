@@ -35,8 +35,12 @@ It does not provision Redis. Bring an Azure Cache for Redis instance if you want
 ```bash
 git clone https://github.com/socketdev-demo/socket-firewall-azure-container-apps.git
 cd socket-firewall-azure-container-apps
-cp terraform.tfvars.example terraform.tfvars
+./setup.sh
 ```
+
+`setup.sh` walks you through every value interactively: one question per setting, a hint about what it controls and where to find the answer, and validation where it matters (Key Vault name length, subnet size and delegation when you're logged into the Azure CLI). It writes `terraform.tfvars`, backs up any existing one, and prints the secret-export commands. Re-running it picks up your previous answers as defaults.
+
+Prefer to edit by hand? `cp terraform.tfvars.example terraform.tfvars` and use the table below.
 
 ### What to set in terraform.tfvars
 
@@ -102,6 +106,7 @@ Key variables:
 - `domain` - Hostname clients use to reach the firewall (required). Set to the FQDN from terraform output or your custom DNS name.
 - `registries` - Map of registry name to upstream URL (default: npm only)
 - `registry_overrides` - Map a route name to its firewall ecosystem type when they differ (e.g. `"plugins-gradle" = "maven"`, `"repository/npm-remote" = "npm"`)
+- `registry_domains` - Host-based routing for transparent DNS interception (see the Transparent DNS interception section). Each entry's hostnames are routed by Host header, bound as Container App custom domains, and added to the generated cert's SANs.
 - `ssl_cert` / `ssl_key` - SSL certificate PEM content (ignored when `generate_self_signed_cert = true`, the default)
 - `subnet_id` / `vnet_id` - Network configuration (required)
 - `min_replicas` / `max_replicas` - Scaling bounds (default: 1 / 5)
@@ -183,6 +188,33 @@ npm config set registry https://registry.company.com/repository/npm-remote
 pip install --index-url https://registry.company.com/repository/pypi-remote/simple <package>
 ```
 
+### Transparent DNS interception (zero developer configuration)
+
+The enterprise rollout pattern: internal DNS points the real registry hostnames (`registry.npmjs.org`, `pypi.org`, ...) at the firewall, so every developer and CI machine routes through it with nothing configured on the endpoint, and nothing an AI coding agent can edit its way around. Requests arrive carrying the original hostname and full path, which path routing alone returns 404 for — `registry_domains` adds the host-based routing that matches them:
+
+```hcl
+registry_domains = {
+  npm          = { domains = ["registry.npmjs.org"], upstream = "https://registry.npmjs.org" }
+  pypi         = { domains = ["pypi.org"], upstream = "https://pypi.org" }
+  "pypi-files" = { domains = ["files.pythonhosted.org"], upstream = "https://files.pythonhosted.org", registry = "pypi" }
+}
+```
+
+`setup.sh` generates the full map for your chosen ecosystems, including the companion hosts people forget (`files.pythonhosted.org` for pip downloads, `static.crates.io` for cargo). Upstreams are host roots because transparent requests keep their full path. The template binds every listed hostname as a Container App custom domain (internal environments accept third-party hostnames without ownership validation) and, with the generated cert, adds them as SANs.
+
+Three things must stay in lockstep, same hostname list in each: this map, the internal DNS records (A records to `terraform output static_ip`), and the certificate SANs.
+
+Prove it works before touching DNS, from any machine in the VNet:
+
+```bash
+# simulate the DNS record with --resolve
+curl -s --resolve registry.npmjs.org:443:$(terraform output -raw static_ip) https://registry.npmjs.org/lodash/4.17.21
+# expect package JSON; then a policy block through the same path, expect 403
+curl -s --resolve registry.npmjs.org:443:$(terraform output -raw static_ip) -o /dev/null -w '%{http_code}\n' https://registry.npmjs.org/lodash/-/lodash-3.0.0.tgz
+```
+
+After changing `registry_domains` (or `registries`) on a running deployment, restart the revision: the firewall renders its nginx config from socket.yml at startup, and Azure updates the mounted config in place without restarting anything. See Troubleshooting.
+
 ## Outputs
 
 - `fqdn` - Internal FQDN of the Container App
@@ -261,6 +293,40 @@ grep SOCKET_DECISION /tmp/sfw.log
 grep -i redis /tmp/sfw.log    # confirm Redis connected; a bad key fails silently to local cache
 ```
 
+## Certificates and client trust
+
+**Default (pilots):** `generate_self_signed_cert = true` creates a 10-year cert with SANs covering `domain` plus all `registry_domains` hostnames. Test clients need `-k`/`NODE_EXTRA_CA_CERTS`-style trust since nothing signs it.
+
+**Production:** bring a cert from your internal CA — endpoints already trust the corporate root, so developers see valid TLS with zero prompts. Set `generate_self_signed_cert = false` and export the PEMs before apply:
+
+```bash
+export TF_VAR_ssl_cert="$(cat /path/to/cert-chain.pem)"
+export TF_VAR_ssl_key="$(cat /path/to/private-key.pem)"
+```
+
+The cert file must contain the **full chain** (leaf plus intermediates) and a SAN for every hostname clients will use — the `domain` value plus every `registry_domains` hostname. Verify both before applying:
+
+```bash
+grep -c "BEGIN CERT" cert-chain.pem    # expect 2 or more
+openssl x509 -in cert-chain.pem -noout -ext subjectAltName
+```
+
+A leaf-only file is the classic silent failure: browsers and `curl.exe` still validate (Windows fetches missing intermediates on its own), while npm fails with `UNABLE_TO_VERIFY_LEAF_SIGNATURE` because Node never does.
+
+**Client runtime trust (Windows fleets):** the OS trust store only covers some package managers. Tools that read the Windows cert store work as soon as your GPO root is present: NuGet/dotnet/Visual Studio, Go, Cargo (standard toolchain), and VS Code-family editors. Tools that ship their own trust bundles need pointing — all at one combined PEM (public roots plus your root and intermediate appended):
+
+| Runtime | Mechanism |
+|---|---|
+| npm and all Node tools (including AI coding agents) | `NODE_EXTRA_CA_CERTS=<bundle>` (additive) |
+| pip | `PIP_CERT=<bundle>` (replaces the default bundle — must be the combined file) |
+| Python requests-based tools, conda | `REQUESTS_CA_BUNDLE=<bundle>` |
+| RubyGems and other OpenSSL-linked tools | `SSL_CERT_FILE=<bundle>` (also replaces — combined file only) |
+| Java / Maven / Gradle | `keytool -importcert -cacerts -alias corp-root -file root.pem -storepass changeit -noprompt`, once per JDK install |
+
+Push the bundle and the four machine environment variables via your MDM. One more if anyone uses `uv`: `UV_NATIVE_TLS=true` makes it read the OS store.
+
+**Testing tip:** WSL's Ubuntu has its own CA bundle and does not inherit the Windows cert store. To test the trust path developers will actually use, run `curl.exe` (the Windows curl, callable from WSL bash) rather than WSL's `curl`.
+
 ## Troubleshooting
 
 After `terraform apply`, run `terraform output troubleshooting` to see useful debugging commands for your deployment.
@@ -315,9 +381,21 @@ Fix: Set the Front Door origin host header to the customer-facing domain (e.g., 
 **Packages install but are not scanned**
 Verify your API token has the `packages` and `entitlements:list` scopes, and that the org has the `firewall` entitlement. With `socket_fail_open = true` (the default), invalid tokens or a missing entitlement silently pass all packages through without scanning. Check container logs for `Firewall access validation failed` or `401` errors; a healthy deployment shows `SOCKET_DECISION` entries with `socket_api_response_code: 200`.
 
-**Secret changes not taking effect after terraform apply**
-Container Apps secret volumes are immutable per revision. Restarting the same revision reloads the same secrets. Force a new revision:
+**Config changes applied but the firewall behaves like the old config (e.g. transparent registry hostnames return the firewall's branded 404)**
+The firewall renders its nginx config from socket.yml once at startup, and Azure updates a changed secret volume in place without restarting the replica. The tell: `cat /mnt/config/socket-yml` in the container shows the new config while the firewall serves old routes, and `ls /app/sites-enabled/` is missing the per-registry conf files. Restart the revision so the entrypoint re-reads the mounted config:
 ```bash
+az containerapp revision restart -n <app-name> -g <rg> --revision <name>
+```
+Then confirm: `ls /app/sites-enabled/` shows one conf per `registry_domains` entry.
+
+**npm fails with UNABLE_TO_VERIFY_LEAF_SIGNATURE while curl.exe and browsers work**
+Two causes, usually both. The served cert is missing its intermediate (Windows silently fetches missing intermediates, Node doesn't — re-export the full chain into `TF_VAR_ssl_cert` and re-apply), and Node doesn't read the Windows cert store at all (set `NODE_EXTRA_CA_CERTS` — see Certificates and client trust). Never leave `strict-ssl false` on a developer machine as the workaround.
+
+**Secret changes not taking effect after terraform apply**
+Running replicas keep the secret values they started with. Restart the revision (re-reads updated secret volumes and env secrets) or force a new one:
+```bash
+az containerapp revision restart -n <app-name> -g <rg> --revision <name>
+# or
 az containerapp update -n <app-name> -g <rg>
 ```
 
