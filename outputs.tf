@@ -69,3 +69,8 @@ output "troubleshooting" {
 
   EOT
 }
+
+output "static_ip" {
+  description = "Static IP of the environment's internal load balancer. DNS A-record target for the firewall hostname and any registry hostnames you route to it."
+  value       = azurerm_container_app_environment.this.static_ip_address
+}

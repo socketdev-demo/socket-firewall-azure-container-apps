@@ -30,15 +30,35 @@ subnet_id = "/subscriptions/<SUB_ID>/resourceGroups/<RG>/providers/Microsoft.Net
 #
 # Direct routes (firewall in front of public registries):
 registries = {
-  npm = "https://registry.npmjs.org"
-  # pypi  = "https://pypi.org"
-  # maven = "https://repo1.maven.org/maven2"
+  npm              = "https://registry.npmjs.org"
+  pypi             = "https://pypi.org"
+  maven            = "https://repo1.maven.org/maven2"
+  "plugins-gradle" = "https://plugins.gradle.org/m2"
+  rubygems         = "https://rubygems.org"
+  go               = "https://proxy.golang.org"
+  cargo            = "https://index.crates.io"
+  nuget            = "https://api.nuget.org"
+  "nuget-v2"       = "https://www.nuget.org/api/v2"
+  conda            = "https://repo.anaconda.com/pkgs/main"
+  openvsx          = "https://open-vsx.org"
+}
+#
+# When a route name is not itself an ecosystem, map it to one here.
+# Without this, the firewall has no parser for the route and traffic
+# passes through unscanned.
+registry_overrides = {
+  "plugins-gradle" = "maven"
+  "nuget-v2"       = "nuget"
 }
 #
 # Artifactory / upstream mode (firewall in front of Artifactory):
 # registries = {
-#   "repository/npm-remote" = "https://company.jfrog.io/artifactory/api/npm/npm-remote"
+#   "repository/npm-remote"  = "https://company.jfrog.io/artifactory/api/npm/npm-remote"
 #   "repository/pypi-remote" = "https://company.jfrog.io/artifactory/api/pypi/pypi-remote"
+# }
+# registry_overrides = {
+#   "repository/npm-remote"  = "npm"
+#   "repository/pypi-remote" = "pypi"
 # }
 
 # Transparent DNS interception (optional)
