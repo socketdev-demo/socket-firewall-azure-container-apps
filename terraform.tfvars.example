@@ -1,4 +1,7 @@
 # Required
+# Firewall image pinned to a release. Use the newest version from
+# https://github.com/SocketDev/socket-registry-firewall/releases (no :latest).
+firewall_image      = "socketdev/socket-registry-firewall:X.Y.Z"
 location            = "eastus"
 resource_group_name = "rg-socket-firewall"
 # environment_name also derives the Key Vault name (kv-<environment_name>).
@@ -104,7 +107,6 @@ redis_enabled = false
 # redis_password_key_vault_secret_id = "https://<vault>.vault.azure.net/secrets/<name>"
 
 # Scaling
-firewall_image = "socketdev/socket-registry-firewall:2.16.5"
 min_replicas   = 2
 max_replicas   = 10
 cpu            = 1.0

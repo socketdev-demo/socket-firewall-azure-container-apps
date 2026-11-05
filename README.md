@@ -36,6 +36,7 @@ See `variables.tf` for all configurable inputs with descriptions and defaults.
 
 Key variables:
 - `socket_api_token` - Socket.dev API token (required, sensitive)
+- `firewall_image` - Firewall image pinned to a release tag or digest (required, no default, `:latest` rejected). Pick a version from the [releases page](https://github.com/SocketDev/socket-registry-firewall/releases).
 - `domain` - Hostname clients use to reach the firewall (required): your DNS name, or the FQDN from terraform output. Download URLs are rewritten to the first hostname; add any other names that reach the firewall after it, separated by spaces.
 - `registries` - Map of registry name to upstream URL (default: npm only)
 - `ssl_cert` / `ssl_key` - Your certificate chain and unencrypted private key in PEM (sensitive), used when `generate_self_signed_cert = false`. See [Using a certificate from your own CA](#using-a-certificate-from-your-own-ca).
