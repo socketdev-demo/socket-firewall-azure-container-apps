@@ -42,14 +42,27 @@ locals {
   routes = [for name, upstream in var.registries : {
     path     = "/${name}"
     upstream = upstream
-    registry = name
+    registry = lookup(var.registry_overrides, name, name)
   }]
+
+  # The firewall writes path_routing.domain verbatim into rewritten download
+  # URLs, so it has to be a single hostname. Download URLs use the first name
+  # in var.domain. Any other names (for example the Container App FQDN behind
+  # Front Door) and localhost go in allowed_domain, which only adds them to the
+  # hostnames the firewall answers on.
+  domain_names   = [for d in split(" ", var.domain) : d if d != "" && d != "localhost"]
+  primary_domain = local.domain_names[0]
+  extra_domains  = slice(local.domain_names, 1, length(local.domain_names))
 
   socket_yml = yamlencode(merge(
     {
       ports = {
         http  = 8080
         https = 8443
+        # Container Apps HTTP ingress terminates TLS and forwards cleartext.
+        # The image's HTTP listener redirects to HTTPS when that listener is
+        # enabled, so disable it and serve on 8080.
+        disable_https = true
       }
       socket = {
         fail_open = var.socket_fail_open
@@ -62,9 +75,10 @@ locals {
         key  = "/mnt/config/ssl-key"
       }
       path_routing = {
-        enabled = true
-        domain  = "${var.domain} localhost"
-        routes  = local.routes
+        enabled        = true
+        domain         = local.primary_domain
+        allowed_domain = concat(local.extra_domains, ["localhost"])
+        routes         = local.routes
       }
     },
     var.debug_logging_enabled ? {
@@ -215,9 +229,9 @@ resource "tls_self_signed_cert" "server" {
 }
 
 resource "pkcs12_from_pem" "server" {
-  count           = var.generate_self_signed_cert ? 1 : 0
-  cert_pem        = tls_self_signed_cert.server[0].cert_pem
-  private_key_pem = tls_private_key.server[0].private_key_pem
+  count           = local.has_ingress_certificate ? 1 : 0
+  cert_pem        = local.ssl_cert_pem
+  private_key_pem = local.ssl_key_pem
   password        = ""
 }
 
@@ -225,8 +239,16 @@ locals {
   ssl_cert_pem = var.generate_self_signed_cert ? tls_self_signed_cert.server[0].cert_pem : var.ssl_cert
   ssl_key_pem  = var.generate_self_signed_cert ? tls_private_key.server[0].private_key_pem : var.ssl_key
 
-  # Custom domains: all hostnames from the domain variable except "localhost"
-  custom_domains = [for d in split(" ", var.domain) : d if d != "localhost"]
+  # Cert SANs use every hostname in var.domain (plus localhost). Ingress
+  # bindings cannot include localhost or the platform FQDN Azure already owns.
+  custom_domains = [
+    for d in split(" ", var.domain) : d
+    if d != "" && d != "localhost" && !endswith(d, ".azurecontainerapps.io") && d != "azurecontainerapps.io"
+  ]
+
+  # Environment certificate + bindings need a PEM in Terraform. Self-signed
+  # generation or ssl_cert/ssl_key both qualify; Key Vault-only IDs do not.
+  has_ingress_certificate = var.generate_self_signed_cert || (var.ssl_cert != "" && var.ssl_key != "")
 }
 
 resource "azurerm_key_vault_secret" "ssl_cert" {
@@ -288,7 +310,7 @@ resource "azurerm_container_app_environment" "this" {
 # host header (which it must, so tarball URLs are rewritten correctly).
 
 resource "azurerm_container_app_environment_certificate" "server" {
-  count                        = var.generate_self_signed_cert ? 1 : 0
+  count                        = local.has_ingress_certificate ? 1 : 0
   name                         = "cert-${local.env_name}"
   container_app_environment_id = azurerm_container_app_environment.this.id
   certificate_blob_base64      = pkcs12_from_pem.server[0].result
@@ -357,9 +379,19 @@ resource "azurerm_container_app" "firewall" {
   # ── Ingress (internal only) ─────────────────────────────────────────────
 
   ingress {
-    external_enabled = false
-    target_port      = 8443
-    transport        = "http"
+    # On an internal environment (internal_load_balancer_enabled = true),
+    # external_enabled = true scopes ingress to the VNet (portal shows
+    # "Limited to VNet"). Setting it to false scopes ingress to the Container
+    # Apps environment only, which leaves the firewall unreachable from
+    # developer machines, CI runners, jumpboxes, or Front Door.
+    external_enabled = true
+
+    # HTTP ingress terminates TLS and forwards cleartext. 8443 is TLS-only, so
+    # targeting it with transport "http" sends cleartext to nginx's HTTPS
+    # listener. 8080 redirects to HTTPS unless that listener is disabled
+    # (see disable_https in socket_yml). Serve the app on 8080 instead.
+    target_port = 8080
+    transport   = "http"
 
     traffic_weight {
       percentage      = 100
@@ -461,8 +493,8 @@ resource "azurerm_container_app" "firewall" {
       # ── Liveness probe ────────────────────────────────────────────────
 
       liveness_probe {
-        transport               = "HTTPS"
-        port                    = 8443
+        transport               = "HTTP"
+        port                    = 8080
         path                    = "/health"
         initial_delay           = 15
         interval_seconds        = 30
@@ -473,8 +505,8 @@ resource "azurerm_container_app" "firewall" {
       # ── Readiness probe ───────────────────────────────────────────────
 
       readiness_probe {
-        transport               = "HTTPS"
-        port                    = 8443
+        transport               = "HTTP"
+        port                    = 8080
         path                    = "/health"
         interval_seconds        = 10
         timeout                 = 3
@@ -485,8 +517,8 @@ resource "azurerm_container_app" "firewall" {
       # ── Startup probe ─────────────────────────────────────────────────
 
       startup_probe {
-        transport               = "HTTPS"
-        port                    = 8443
+        transport               = "HTTP"
+        port                    = 8080
         path                    = "/health"
         interval_seconds        = 5
         timeout                 = 3
@@ -513,7 +545,7 @@ resource "azurerm_container_app" "firewall" {
 # Host: <custom-domain> to the Container App.
 
 resource "azurerm_container_app_custom_domain" "domains" {
-  for_each = var.generate_self_signed_cert ? toset(local.custom_domains) : toset([])
+  for_each = local.has_ingress_certificate ? toset(local.custom_domains) : toset([])
 
   name                                     = each.value
   container_app_id                         = azurerm_container_app.firewall.id
