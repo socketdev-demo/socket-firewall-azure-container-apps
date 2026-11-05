@@ -36,9 +36,9 @@ See `variables.tf` for all configurable inputs with descriptions and defaults.
 
 Key variables:
 - `socket_api_token` - Socket.dev API token (required, sensitive)
-- `domain` - Hostname clients use to reach the firewall (required). Set to the FQDN from terraform output or your custom DNS name.
+- `domain` - Hostname clients use to reach the firewall (required): your DNS name, or the FQDN from terraform output. Download URLs are rewritten to the first hostname; add any other names that reach the firewall after it, separated by spaces.
 - `registries` - Map of registry name to upstream URL (default: npm only)
-- `ssl_cert` / `ssl_key` - SSL certificate PEM content (required, sensitive)
+- `ssl_cert` / `ssl_key` - Your certificate chain and unencrypted private key in PEM (sensitive), used when `generate_self_signed_cert = false`. See [Using a certificate from your own CA](#using-a-certificate-from-your-own-ca).
 - `subnet_id` / `vnet_id` - Network configuration (required)
 - `min_replicas` / `max_replicas` - Scaling bounds (default: 1 / 5)
 - `cpu` / `memory` - Container resources (default: 1.0 / 2Gi)
@@ -57,6 +57,7 @@ The `registries` variable controls path-based routing. Each entry creates a rout
 ```hcl
 registries = {
   npm   = "https://registry.npmjs.org"
+  nuget = "https://api.nuget.org"
   pypi  = "https://pypi.org"
   maven = "https://repo1.maven.org/maven2"
 }
@@ -65,6 +66,17 @@ registries = {
 ```bash
 npm config set registry https://registry.company.com/npm
 pip install --index-url https://registry.company.com/pypi/simple <package>
+```
+
+For NuGet, point `nuget.config` at the firewall and clear the other sources so restores can't go around it:
+
+```xml
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="socket-firewall" value="https://registry.company.com/nuget/v3/index.json" />
+  </packageSources>
+</configuration>
 ```
 
 ### Upstream mode (firewall in front of Artifactory)
@@ -76,6 +88,16 @@ registries = {
   "repository/npm-remote"  = "https://company.jfrog.io/artifactory/api/npm/npm-remote"
   "repository/pypi-remote" = "https://company.jfrog.io/artifactory/api/pypi/pypi-remote"
 }
+
+# Required whenever a route name is not itself an ecosystem name.
+# Without these, the firewall does not recognize "repository/npm-remote" as an
+# ecosystem and serves the route through a plain streaming proxy, forwarding
+# packages with no inspection. Installs succeed and the deployment looks
+# healthy; the only signal is that no SOCKET_DECISION lines appear in the logs.
+registry_overrides = {
+  "repository/npm-remote"  = "npm"
+  "repository/pypi-remote" = "pypi"
+}
 ```
 
 ```bash
@@ -83,9 +105,27 @@ npm config set registry https://registry.company.com/repository/npm-remote
 pip install --index-url https://registry.company.com/repository/pypi-remote/simple <package>
 ```
 
+## Using a certificate from your own CA
+
+Container Apps ends TLS at its ingress and forwards plain HTTP to the firewall on port 8080, so the certificate clients see is the one bound to the ingress. To use a certificate from your internal CA:
+
+1. Issue one certificate whose SANs cover the hostnames clients will use (the names in `domain`).
+2. Set `generate_self_signed_cert = false` and pass the chain, server certificate first and then any intermediates, plus the unencrypted key:
+
+   ```bash
+   export TF_VAR_ssl_cert="$(cat fullchain.pem)"
+   export TF_VAR_ssl_key="$(cat privkey.pem)"
+   terraform apply
+   ```
+
+   Terraform uploads the certificate to the Container Apps environment and binds it to each hostname in `domain` except `*.azurecontainerapps.io` names, which Azure already serves. Both values are stored in Terraform state, so keep the state in a protected backend.
+3. In your private DNS, add an A record for each hostname in `domain` pointing at `terraform output static_ip`.
+4. Make sure clients trust your CA. Visual Studio and NuGet on Windows use the Windows certificate store. Node ships its own CA list, so for npm set `NODE_USE_SYSTEM_CA=1` (Node 22.19+ or 24.6+) or `NODE_EXTRA_CA_CERTS` to a PEM copy of your root CA.
+
 ## Outputs
 
 - `fqdn` - Internal FQDN of the Container App
+- `static_ip` - Static IP of the environment's internal load balancer (DNS A-record target)
 - `resource_group_name` - Resource group name
 - `container_app_name` - Container App name
 - `container_app_environment_name` - Container Apps Environment name
@@ -101,13 +141,18 @@ The firewall runs on an internal load balancer, so test from a VM or resource wi
 curl -k https://<FQDN>/health
 # Expected: SocketFirewall/x.x.x - Health OK - path-routing (...)
 
+# Download URLs should point back at your firewall hostname
+npm view lodash dist.tarball --registry https://<FQDN>/npm/
+# Expected: https://<FQDN>/npm/lodash/-/lodash-<version>.tgz (your hostname, not registry.npmjs.org)
+
 # Test a safe package
 npm install lodash --registry https://<FQDN>/npm
 
-# Test a blocked package
+# Test a blocked package. lodahs@0.0.1-security is npm's empty placeholder for a
+# removed malicious package: no code, no install scripts, still blocked as malware.
 # IMPORTANT: clear npm cache first, or cached tarballs bypass the firewall
 npm cache clean --force
-npm install peacenotwar@9.1.3 --registry https://<FQDN>/npm --prefer-online
+npm install lodahs@0.0.1-security --registry https://<FQDN>/npm --prefer-online
 # Expected: E403 "Blocked by Security Policy"
 ```
 
@@ -121,22 +166,21 @@ To enable verbose logging, set `log_level = "debug"` in your tfvars and redeploy
 Check logs in Log Analytics or with `az containerapp logs show`. The most common cause is an invalid or missing SSL certificate. If using the default self-signed cert (`generate_self_signed_cert = true`), verify the SANs with `terraform output ssl_cert_sans`.
 
 **404 errors on package requests**
-The `domain` variable must match the Host header that clients send. If you are using the Container App FQDN directly, set `domain` to that FQDN. Run `terraform output fqdn` to get the value.
+Every hostname clients send in the Host header has to be in the `domain` variable. If clients use the Container App FQDN directly, add it to `domain` (`terraform output fqdn` prints it).
 
 **Azure Front Door: 421 SSLMismatchedSNI**
 Front Door validates that the Host header matches a custom domain configured on the Front Door profile. This error means either:
 1. The custom domain is not associated with the Front Door endpoint/route, or
 2. The origin host header does not match the cert's SANs.
 
-The `domain` variable controls the cert SANs (when using the self-signed cert). Include all hostnames that Front Door might send, separated by spaces:
+The `domain` variable controls the cert SANs (when using the self-signed cert). Include all hostnames that Front Door might send, separated by spaces, with the customer-facing name first:
 ```hcl
 domain = "registry.company.com ca-socket-fw.xxxxx.eastus.azurecontainerapps.io"
 ```
+The Container App FQDN (`*.azurecontainerapps.io`) is valid as a SAN so origin host-header checks succeed. Do not expect it to be bound as a custom domain — Azure already owns that name, and the template skips it when creating hostname bindings.
 
-**Tarball URLs point to the Container App FQDN instead of the customer-facing domain**
-The firewall rewrites tarball URLs using the `Host` header it receives. If Front Door's origin host header is set to the Container App FQDN, tarball URLs will use that FQDN, and npm clients will try to download tarballs directly (bypassing Front Door), which fails with ECONNRESET.
-
-Fix: Set the Front Door origin host header to the customer-facing domain (e.g., `registry.company.com`), and make sure that domain is included in the `domain` variable so the cert's SANs match.
+**Tarball URLs point to the wrong hostname**
+The firewall rewrites download URLs to the first hostname in `domain`, whichever hostname the request arrived on. If npm tries to download tarballs from the Container App FQDN (failing with ECONNRESET behind Front Door), put the customer-facing name first in `domain`.
 
 **Packages install but are not scanned**
 Verify your API token has the `packages` and `entitlements:list` scopes. With `socket_fail_open = true` (the default), invalid or missing tokens silently pass all packages through without scanning. Check container logs for `Firewall access validation failed` or `401` errors.
@@ -152,7 +196,7 @@ If you destroy and recreate the stack, Azure retains the Key Vault in a soft-del
 
 ## Notes
 
-**Custom domain binding**: When `generate_self_signed_cert = true`, the template automatically registers each hostname in the `domain` variable as a custom domain on the Container App. This is required so the Container Apps ingress accepts requests with those Host headers. Without it, requests from Front Door (or any client using a custom hostname) get a 404 from the ingress layer before reaching nginx.
+**Custom domain binding**: When a certificate PEM is available to Terraform (`generate_self_signed_cert = true`, or `ssl_cert` / `ssl_key` with generation disabled), the template registers each customer hostname in the `domain` variable as a custom domain on the Container App. Platform FQDNs (`*.azurecontainerapps.io`) and `localhost` are omitted from those bindings. This is required so the Container Apps ingress accepts requests with those Host headers. Without it, requests from Front Door (or any client using a custom hostname) get a 404 from the ingress layer before reaching nginx. Key Vault secret IDs alone are not enough to upload the ingress certificate; pass `ssl_cert` and `ssl_key` as well if you need custom-hostname bindings.
 
 Azure Container Apps mounts secrets as files in a shared volume at `/mnt/config/`. The template sets the `CONFIG_FILE` env var so the firewall reads socket.yml from the correct path. SSL certificate paths in the generated `socket.yml` reference `/mnt/config/ssl-cert` and `/mnt/config/ssl-key`.
 

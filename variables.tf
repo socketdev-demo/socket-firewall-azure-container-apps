@@ -19,9 +19,16 @@ variable "environment_name" {
 # ── Socket Firewall ──────────────────────────────────────────────────────────
 
 variable "firewall_image" {
-  description = "Docker image for the Socket Registry Firewall"
+  description = <<-EOT
+    Docker image for the Socket Registry Firewall. Pin an explicit version.
+
+    Container Apps resolves a floating tag once, when it creates the revision,
+    and does not re-resolve it. A `:latest` deployment therefore has no
+    reliable answer to "which version is running", and a later `terraform
+    apply` can silently roll a different build.
+  EOT
   type        = string
-  default     = "socketdev/socket-registry-firewall:latest"
+  default     = "socketdev/socket-registry-firewall:2.16.5"
 }
 
 variable "socket_api_token" {
@@ -51,9 +58,39 @@ variable "registries" {
   }
 }
 
+variable "registry_overrides" {
+  description = <<-EOT
+    Map of `registries` key to the firewall's ecosystem type, for routes whose
+    path name is not itself a valid ecosystem. Example:
+    { "repository/npm-remote" = "npm", "plugins-gradle" = "maven" }.
+
+    Unlisted routes fall back to using their `registries` key as the ecosystem.
+    A route whose ecosystem the firewall does not recognize is served by a
+    plain streaming proxy with no package inspection, so it passes traffic
+    through unscanned while appearing to work. The only signal is the absence
+    of SOCKET_DECISION lines in the logs. Map any non-ecosystem route name here.
+
+    Valid ecosystems: npm, pypi, nuget, maven, cargo, rubygems, go, conda,
+    openvsx, huggingface.
+  EOT
+  type        = map(string)
+  default     = {}
+}
+
 variable "domain" {
-  description = "Hostname for path-based routing (e.g., registry.company.com). Use the FQDN from the first deploy or your custom DNS name."
+  description = <<-EOT
+    Hostname clients use to reach the firewall (e.g., registry.company.com):
+    your DNS name, or the FQDN from the first deploy. Package download URLs are
+    rewritten to the first hostname. Other names that also reach the firewall
+    (for example the Container App FQDN behind Front Door) go after it,
+    separated by spaces.
+  EOT
   type        = string
+
+  validation {
+    condition     = length([for d in split(" ", var.domain) : d if d != "" && d != "localhost"]) > 0
+    error_message = "domain must contain at least one hostname other than localhost."
+  }
 }
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -98,14 +135,14 @@ variable "generate_self_signed_cert" {
 }
 
 variable "ssl_cert" {
-  description = "PEM-encoded SSL certificate (ignored when generate_self_signed_cert = true)"
+  description = "PEM-encoded certificate chain: server certificate first, then any intermediates. Must cover every hostname in domain except *.azurecontainerapps.io (ignored when generate_self_signed_cert = true)"
   type        = string
   sensitive   = true
   default     = ""
 }
 
 variable "ssl_key" {
-  description = "PEM-encoded SSL private key (ignored when generate_self_signed_cert = true)"
+  description = "PEM-encoded, unencrypted private key for ssl_cert (ignored when generate_self_signed_cert = true)"
   type        = string
   sensitive   = true
   default     = ""
